@@ -103,6 +103,7 @@ ENV/
 # draw
 curses_drawer/draw
 curses_drawer/*.json
+curses_drawer/log
 
 # handwriting
 handwriting/*.json
