@@ -1,6 +1,8 @@
 #include <curses.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include "jsmn.h"
 
 typedef struct _Pt{
 	int x;
@@ -8,9 +10,15 @@ typedef struct _Pt{
 	struct _Pt *next;
 } Pt;
 
+extern void get_points();
 
 char characterToSave;
+jsmntok_t t[10000]; /* We expect no more than 128 tokens */
+int num_t=0;
+int present_view = 1;
+char present_char[10];
 Pt* Head = NULL;
+
 void allocate(int x, int y) {
 	if (Head == NULL) {
 		Head = (Pt*)malloc(sizeof(Pt));
@@ -101,8 +109,15 @@ void draw_screen(WINDOW *win, int mode) {
 	mvwaddch(win, 50,50, ACS_LRCORNER);
 	if (mode == 0) {
 		mvwaddstr(win, 0, 51,"MODE: CONTINUOUS");
-	} else {
+	} else if (mode == 1){
 		mvwaddstr(win, 0, 51,"MODE: CLICK     ");
+	} else if (mode == 3) {
+		Pt* iter = Head;	
+		while(iter) {
+			mvwaddch(win, iter->y, iter->x, ACS_BLOCK);
+			iter=iter->next;
+		}
+		mvwaddstr(win, 0, 51,present_char);
 	}
 	wrefresh(win);
 }
@@ -212,25 +227,192 @@ void main_loop(WINDOW *win) {
 		fflush(fp);
 	}
 }
+void main_show_loop(WINDOW *win) {
+	int c, choice = 0, val;
+	int movement_started = 0;
+	int delete_started = 0;
+	FILE *fp;
+	fp = fopen("log","w");
+	if (fp == NULL) {
+		return;
+	}
+	MEVENT event;
+	while(1)
+	{	c = getch();
+		switch(c)
+		{	
+			case 'n':
+				delete_all();
+				erase();
+				present_view += 1;
+				get_points();
+				draw_screen(win, 3);
+				wrefresh(win);
+				break;
+			case 'q':
+				return;
+			default:
+				fprintf(fp,"Got event %d\n",c);
+				break;	
+		}
+		fflush(fp);
+	}
+}
+
+char *final_buf;
+char *read_all(FILE *fp) {
+	char *buf_hold[30];
+	char *iter_buf, *buf;
+	int num_read, idx=0,i;
+	do {
+		buf = (char*) malloc(1000);
+		num_read = fread(buf, 1, 1000, fp) ;
+		printf("%d\n", num_read);
+		buf_hold[idx] = buf;
+		idx++;
+	} while (num_read == 1000);
+
+	final_buf = (char*)malloc(((idx-1)*1000) + num_read + 1);
+	printf("final_buf: %d\n",((idx-1)*1000) + num_read + 1);
+	iter_buf = final_buf;
+	for (i = 0; i < (idx-1); i++) {
+		memcpy((void*)iter_buf, (void*)buf_hold[i],1000);
+		iter_buf+= 1000;
+	}
+	memcpy(iter_buf, buf, num_read);
+	iter_buf += num_read;
+	*iter_buf = 0;
+	for (i = 0; i < idx; i++) {
+		free(buf_hold[i]);
+	}
+	return final_buf;
+}
+
+static int jsoneq(const char *json, jsmntok_t *tok, const char *s) {
+	if (tok->type == JSMN_STRING && (int) strlen(s) == tok->end - tok->start &&
+		strncmp(json + tok->start, s, tok->end - tok->start) == 0) {
+		return 0;
+	}
+	return -1;
+}
+
+void read_json(char *fname) {
+	FILE *fp;
+	int i, depth;
+	int r;
+	jsmn_parser p;
+	char *JSMN_STRING;
+
+	jsmn_init(&p);
+
+	fp = fopen(fname,"r");
+	JSMN_STRING=read_all(fp);
+	printf("%s\n",JSMN_STRING);
+	r = jsmn_parse(&p, JSMN_STRING, strlen(JSMN_STRING), t, 
+		sizeof(t)/sizeof(t[0]));
+	if (r < 0) {
+		printf("Failed to parse JSON: %d\n", r);
+		return;
+	}
+	num_t = r;
+}
+
+int get_number(int idx) {
+  char num_buf[5];
+	memcpy(num_buf, final_buf + t[idx].start, t[idx].end - t[idx].start);
+	num_buf[t[idx].end - t[idx].start] = 0;
+	//printf("%d,%d,%s,%c%c\n", t[idx].start, t[idx].end, num_buf,*(final_buf+t[idx].start),*(final_buf+t[idx].end));
+	return atoi(num_buf);
+}
+
+int find_points_in_sample(int parent) {
+	int i,x,y;
+	for (i = parent; i < num_t; i++) {
+		if (t[i].type == JSMN_ARRAY && t[i].parent == parent) {
+			if (t[i+1].type != JSMN_PRIMITIVE || t[i+2].type != JSMN_PRIMITIVE ) {
+					printf("FAILING PRIMITIVE CHECK\n");
+					return -1;
+			}
+			x = get_number(i+1);
+			y = get_number(i+2);
+			allocate(x,y);
+		}
+	}
+}
+
+void find_value_of_sample(int idx) {
+	present_char[0] = *(final_buf + t[idx].start);
+	present_char[1] = ' ';
+	sprintf(present_char+2,"%d", present_view);
+}
+
+void get_points() {
+	int array_depth[3];
+	int parent = 0;
+	int sample_num = 0,i = 0, sample_start;
+
+again:
+	for (i = 0; i < num_t; i++) {
+		if (t[i].parent == 0) {
+			sample_num++;
+		}	
+		if (sample_num == present_view) {
+			break;
+		}
+	}
+	if (i == num_t) {
+		present_view = 1;
+		sample_num = 0;
+		goto again;
+	}
+	sample_start = i;
+	
+	for (i = sample_start; i < num_t; i++) {
+		if (t[i].parent == sample_start) {
+			if (t[i].type == JSMN_ARRAY) {
+				find_points_in_sample(i);
+			} else if (t[i].type == JSMN_STRING) {
+				find_value_of_sample(i);
+			}
+		}
+	}	
+}
 
 int main(int argc, char *argv[]) {
-	if (argc != 2) {
-		printf("%s <character>\n",argv[0]);
+	if (argc != 3) {
+		printf("%s [read|save] <character>\n",argv[0]);
 		return 1;
 	}
 
-	characterToSave = argv[1][0];
-	initscr();
-	cbreak();
-	noecho();
-	keypad(stdscr, TRUE);
-	refresh();
-	mousemask(BUTTON1_CLICKED | BUTTON3_CLICKED | REPORT_MOUSE_POSITION, NULL);
+	if (strcmp(argv[1],"save") == 0) {
+		initscr();
+		cbreak();
+		noecho();
+		keypad(stdscr, TRUE);
+		refresh();
+		mousemask(BUTTON1_CLICKED | BUTTON3_CLICKED | REPORT_MOUSE_POSITION, NULL);
 
-	// makes the terminal report mouse movements.
-	printf("\033[?1003h\n"); 
-	draw_screen(stdscr, 0);
-	main_loop(stdscr);
-	endwin();
+		// makes the terminal report mouse movements.
+		printf("\033[?1003h\n"); 
+
+		draw_screen(stdscr, 0);
+		characterToSave = argv[2][0];
+		main_loop(stdscr);
+		endwin();
+	} else {
+		read_json(argv[2]);
+		get_points();
+
+		initscr();
+		cbreak();
+		noecho();
+		keypad(stdscr, TRUE);
+		refresh();
+
+
+		draw_screen(stdscr, 3);
+		main_show_loop(stdscr);
+		endwin();
+	}
 	return 0;
 }

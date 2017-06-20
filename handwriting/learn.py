@@ -1,4 +1,6 @@
 import json
+import sys
+
 from sklearn.neural_network import MLPClassifier
 
 def getSizes(t):
@@ -34,39 +36,41 @@ def doNormalize(maxx, maxy, sample):
 	for i in range(maxy):
 		for j in range(maxx):
 			if [j,i] in sample:
-				sampledata.append(1)
+				sampledata.append(1.0)
 			else:
-				sampledata.append(0)
+				sampledata.append(0.0)
 	return sampledata
 	
 def normalizeData(t):
-	maxx,maxy = getSizes(t)
+	maxx = 50;
+	maxy = 50;
 	finaldata=[]
 	result=[]
 	for data in t:
-		for sample in t[data]:
-			sampledata = doNormalize(maxx, maxy, sample)
-			finaldata.append(sampledata)
-			if data == "a":
-				result.append(0)
-			else:
-				result.append(1)
+		sampledata = doNormalize(maxx, maxy, data[0])
+		finaldata.append(sampledata)
+		if data[1] == "a":
+			result.append(0.0)
+		else:
+			result.append(1.0)
 	return maxx, maxy, finaldata,result		
 		
 		
-fp = open("data.json","r")
+fp = open(sys.argv[1],"r")
 train = json.load(fp)
 lenx, leny, X,y = normalizeData(train)
 
 if test_xy(X,y):
-	clf = MLPClassifier(solver='lbfgs', alpha=1e-5, hidden_layer_sizes=(5,2), random_state=1)
-	clf.fit(X,y)
-
-	atrial1 = [[6,11],[7,10],[8,9],[9,8],[10,7],[11,6],[11,5],[12,4],[14,4],[15,6],[13,3],[15,5],[16,6],[16,7],[17,8],[18,9],[19,10],[20,11],[10,8],[12,8],[11,8],[13,8],[14,8],[15,8],[16,8]]
-	btrial1 = [[11,3],[11,4],[11,5],[11,6],[11,7],[11,8],[11,9],[11,10],[11,11],[12,3],[13,3],[14,3],[15,3],[16,3],[18,4],[18,5],[18,6],[17,7],[16,7],[13,7],[14,7],[12,7],[15,7],[18,8],[19,9],[18,10],[17,11],[15,11],[14,11],[12,11],[31,16]]
-	atrial2 = [[9,3],[9,4],[9,5],[9,6],[9,7],[9,8],[9,9],[9,10],[9,11],[10,3],[12,3],[11,3],[13,3],[15,3],[14,3],[15,4],[15,5],[15,6],[15,7],[14,7],[13,7],[12,7],[11,7],[10,7],[15,8],[15,9],[15,10],[15,11]]
-
-	sampleA= doNormalize(lenx, leny, atrial1)
-	sampleB= doNormalize(lenx, leny, btrial1)
-	sampleA1= doNormalize(lenx, leny, atrial2)
-	print("atrial1:"+str(clf.predict([sampleA, sampleB, sampleA1])))
+	clf = MLPClassifier(solver='lbfgs', alpha=1e-5, hidden_layer_sizes=(1000,2), shuffle=True,random_state=3, warm_start=True)
+	for i in range(20): 
+		clf.fit(X,y)
+		print(i)
+	fppredict = open(sys.argv[2],"r")
+	predict = json.load(fppredict)
+	predict_ds = []
+	predict_ans = []
+	for sampledata in predict:
+		predict_ds.append(doNormalize(50, 50, sampledata[0]))
+		predict_ans.append(sampledata[1])
+	print("Predicted:"+str(clf.predict(predict_ds)))
+	print("Expected :"+str(predict_ans))

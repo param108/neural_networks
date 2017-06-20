@@ -1,2 +1,2 @@
 draw:	main.c
-	gcc main.c -o draw -lncurses
+	gcc -DJSMN_PARENT_LINKS=1 -g main.c jsmn.c -o draw -lncurses
